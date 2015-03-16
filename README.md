@@ -11,7 +11,7 @@ game write in pygame.
     python boxex.py
     python boxex.py
 
-![demo][demo.png]
+![demo](demo.png)
 
 ## 参考
 * <http://blog.jobbole.com/80385/>
