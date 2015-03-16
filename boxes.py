@@ -2,9 +2,11 @@
 import math
 import pygame
 from pygame.locals import *
-from sys import exit
+# from sys import exit
+from PodSixNet.Connection import ConnectionListener, connection
+# from time import sleep
 
-class BoxesGame():
+class BoxesGame(ConnectionListener):
     def initGraphics(self):
         self.normallinev = pygame.image.load("resources/images/normalline.png")
         self.normallineh = pygame.transform.rotate(self.normallinev, -90)
@@ -16,13 +18,13 @@ class BoxesGame():
         self.separators=pygame.image.load("resources/images/separators.png")
         self.redindicator=pygame.image.load("resources/images/redindicator.png")
         self.greenindicator=pygame.image.load("resources/images/greenindicator.png")
+        self.redplayer=pygame.image.load("resources/images/redplayer.png")
         self.greenplayer=pygame.image.load("resources/images/greenplayer.png")
-        self.blueplayer=pygame.image.load("resources/images/blueplayer.png")
         self.winningscreen=pygame.image.load("resources/images/youwin.png")
         self.gameover=pygame.image.load("resources/images/gameover.png")
         self.score_panel=pygame.image.load("resources/images/score_panel.png")
 
-    def __init__(self):
+    def __init__(self, host, port):
         #1 Import library
         pygame.init()
         pygame.font.init()
@@ -42,7 +44,68 @@ class BoxesGame():
         self.otherplayer=0
         self.didiwin=False
 
+        self.gameid = None
+        self.num = None
+
         self.initGraphics()
+        self.Connect((host, port))
+
+        self.running=False
+
+        # print 'Wait'
+        # while not self.running:
+        #     self.Pump()
+        #     connection.Pump()
+        #     sleep(0.01)
+        # print 'Game started'
+        #determine attributes from player #
+        # self.turn= (self.num == 0)
+        self.marker = self.greenplayer
+        self.othermarker = self.redplayer
+        # place delay
+        self.justplaced=10
+
+    def Network_startgame(self, data):
+        self.running=True
+        self.num=data["player"]
+        self.gameid=data["gameid"]
+        self.turn == (self.num == 0)
+
+    def Network_yourturn(self, data):
+        #torf = short for true or false
+        self.turn = data["torf"]
+
+    def Network_place(self, data):
+        # get attributes
+        x = data['x']
+        y = data['y']
+        hv = data['is_horizontal']
+        if hv:
+            self.boardh[y][x] = True
+        else:
+            self.boardv[y][x] = True
+
+    def Network_win(self, data):
+        self.owner[data["x"]][data["y"]]="win"
+        # self.boardh[data["y"]][data["x"]]=True
+        # self.boardv[data["y"]][data["x"]]=True
+        # self.boardh[data["y"]+1][data["x"]]=True
+        # self.boardv[data["y"]][data["x"]+1]=True
+        #add one point to my score
+        self.me+=1
+
+    def Network_lose(self, data):
+        print 'Lose', data
+        self.owner[data["x"]][data["y"]]="lose"
+        # self.boardh[data["y"]][data["x"]]=True
+        # self.boardv[data["y"]][data["x"]]=True
+        # self.boardh[data["y"]+1][data["x"]]=True
+        # self.boardv[data["y"]][data["x"]+1]=True
+        #add one to other players score
+        self.otherplayer+=1
+
+    def Network_close(self, data):
+        exit()
 
     def drawBoard(self):
         for x in range(6):
@@ -69,7 +132,16 @@ class BoxesGame():
                     if self.owner[x][y]=="win":
                         self.screen.blit(self.marker, (x*64+5, y*64+5))
                     if self.owner[x][y]=="lose":
+                        # print 'Loose blit'
                         self.screen.blit(self.othermarker, (x*64+5, y*64+5))
+
+    def drawWait(self):
+        font = pygame.font.SysFont(None, 32)
+        label = font.render("Wait other to connect", 1, (255, 255, 255))
+        rect = label.get_rect()
+        rect.centerx = self.screen.get_rect().centerx
+        rect.centery = self.screen.get_rect().centery
+        self.screen.blit(label, rect)
 
     def drawHUD(self):
         #draw the background for the bottom:
@@ -83,7 +155,8 @@ class BoxesGame():
         #draw surface
         self.screen.blit(label, (10, 400))
 
-        self.screen.blit(self.greenindicator, (130, 395))
+        # self.screen.blit(self.greenindicator, (130, 395))
+        self.screen.blit(self.greenindicator if self.turn else self.redindicator, (130, 395))
         #same thing here
         myfont64 = pygame.font.SysFont(None, 64)
         myfont20 = pygame.font.SysFont(None, 20)
@@ -99,23 +172,37 @@ class BoxesGame():
         self.screen.blit(scoreother, (340, 435))
 
     def update(self):
+        if self.me+self.otherplayer==36:
+            self.didiwin=True if self.me>self.otherplayer else False
+            return 1
+
         # sleep to make the game 60 fps
         self.clock.tick(60)
 
+        connection.Pump()
+        self.Pump()
+
         # clear the screen
         self.screen.fill(0)
-
-        # draw the board
-        self.drawBoard()
-        self.drawOwnermap()
-        self.drawHUD()
-        self.boardv[5][3] = True
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT or \
                 (event.type == pygame.KEYDOWN and event.key == K_q):
                 pygame.quit()
                 exit(0)
+
+        if not self.running:
+            self.drawWait()
+            pygame.display.flip()
+            return 0
+
+        # draw the board
+        self.drawBoard()
+        self.drawOwnermap()
+        self.drawHUD()
+        
+
+        self.justplaced -= 1
 
         #1
         mouse = pygame.mouse.get_pos()
@@ -143,15 +230,17 @@ class BoxesGame():
         else:
             alreadyplaced=False
         #7   
-        if pygame.mouse.get_pressed()[0] and not alreadyplaced and not isoutofbounds:
+        if pygame.mouse.get_pressed()[0] and not alreadyplaced and not isoutofbounds and self.turn == True and self.justplaced <= 0:
+            self.justplaced=10
             if is_horizontal:
                 self.boardh[ypos][xpos]=True
+                self.Send({"action": "place", "x":xpos, "y":ypos, "is_horizontal": is_horizontal, "gameid": self.gameid, "num": self.num})
             else:
                 self.boardv[ypos][xpos]=True
-
+                self.Send({"action": "place", "x":xpos, "y":ypos, "is_horizontal": is_horizontal, "gameid": self.gameid, "num": self.num})
 
         pygame.display.flip()
-        
+
     def finished(self):
         self.screen.blit(self.gameover if not self.didiwin else self.winningscreen, (0,0))
         while 1:
@@ -161,9 +250,11 @@ class BoxesGame():
             pygame.display.flip()
 
 def main():
-    bg = BoxesGame()
+    bg = BoxesGame('localhost', 31425)
     while True:
-        bg.update()
+        if bg.update()==1:
+            break
+    bg.finished()
 
 if __name__ == '__main__':
     main()
